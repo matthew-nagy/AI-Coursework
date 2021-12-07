@@ -4,6 +4,8 @@ m(e).
 m(w).
 m(s).
 
+path.
+
 %Given a direction and a position, find what the new position is
 get_moved_position(n, p(X, Y), p(X, NY)) :- NY is Y-1.
 get_moved_position(e, p(X, Y), p(NX, Y)) :- NX is X+1.
@@ -44,7 +46,9 @@ get_single_possible_position([Position, Travelled, _, _, _], [_, OpenCells, Clos
     get_moved_position(Direction, Position, NextPosition),
     not_last_travelled(NextPosition, Travelled),
     on_board(NextPosition, BoardDimension),
-    map_adjacent(Position, NextPosition, empty),
+    %Let it travel over agents too. This is neccessary for part 3, but due to how the closed cells
+    %work this shouldn't effect performance in parts 1 or 2
+    (map_adjacent(Position, NextPosition, empty) ; map_adjacent(Position, NextPosition, a(_))),
     %Put the most costly predicates at the end to reduce likelyhood of them being explored
     not(
         contains(OpenCells, NextPosition) ;
@@ -171,7 +175,7 @@ find_astar(Task, IlligalGoals, StartPosition, StartEnergy, [Path, PathCost]):-
 
 
 charge_station_not_visited(_, []).
-charge_station_not_visited(c(X), [[empty, _] | Tail]):-
+charge_station_not_visited(c(X), [[path, _] | Tail]):-
     charge_station_not_visited(c(X), Tail).
 charge_station_not_visited(c(X), [c(Y) | Tail]):-
     X \= Y,
@@ -182,7 +186,7 @@ find_action(Task, IlligalGoals, Position, Energy, DesiredLocationEnergy, Action,
     RemainingEnergyAtGoal is Energy - OutCost,
     RemainingEnergyAtGoal >= DesiredLocationEnergy,
     !,%You have a path to target, stop looking
-    OutAction = [[empty, Path] | Action].
+    OutAction = [[path, Path] | Action].
 
 %If you can't find a charger with the first goal you are screwed
 find_action(find(c()), _, _, _, _, _, _, _) :- !, fail.
@@ -190,7 +194,7 @@ find_action(Task, IlligalGoals, Position, Energy, DesiredLocationEnergy, Action,
     charge_station_not_visited(c(X), Action),
     find_astar(find(c(X)), IlligalGoals, Position, Energy, [ToChargePath, ToChargeCost]),
     last(ToChargePath, ChargePosition),
-    SemiAction = [ c(X) , [empty, ToChargePath] | Action ],
+    SemiAction = [ c(X) , [path, ToChargePath] | Action ],
 
     ailp_grid_size(GridSize),
     MaxEnergy is (GridSize * GridSize) / 4,
@@ -205,7 +209,7 @@ run_path(_, []).
 run_path(Agent, [c(X) | Tail]):-
     run_path(Agent, Tail),
     agent_topup_energy(Agent, c(X)).
-run_path(Agent, [ [empty, Path] | Tail ]):-
+run_path(Agent, [ [path, Path] | Tail ]):-
     run_path(Agent, Tail),
     agent_do_moves(Agent, Path).
 
