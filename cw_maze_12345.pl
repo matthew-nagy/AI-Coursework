@@ -41,11 +41,11 @@ w_insert_point([openPoint(A, B) | T], openPoint(C, D), Acc, Ans):-
 
     NewAcc = [openPoint(A, B) | [openPoint(C, D) | Acc]],
     finished_insert_point(T, NewAcc, Ans).
-w_insert_point([H | T], openPoint(C, D), Acc, Ans):-
-    H = [_, _, HeadCost, _, _],
-    openPoint(C, D) = [_, _, NewCost, _, _],
+w_insert_point([openPoint(A, B)  | T], openPoint(C, D), Acc, Ans):-
+    get_maze_heuristic(C, NewCost),
+    get_maze_heuristic(A, HeadCost),
     NewCost >= HeadCost,
-    w_insert_point(T, openPoint(C, D), [H | Acc], Ans).
+    w_insert_point(T, openPoint(C, D), [openPoint(A, B)  | Acc], Ans).
 
 
 %Inserts nodes to the queue, ordering off cost 
@@ -128,10 +128,27 @@ get_path_from_intersections(KnownPaths, IntersectsToGoal, MyIntersects, Path):-
     get_intersect_path_to_goal(IntersectsToGoal, MyIntersects, Intersections),
     Intersections = [IAt | IT],
     get_intersection_path(KnownPaths, IAt, IT, [], Path).
+get_path_from_intersections(_, [Goal | _], [Position | _], Path):-
+    find_astar(go(Goal), [], Position, 999, [Path, _]).
 
 %manage_moving_agent_intersections(CurrentIntersections, NewPosition, KnownIntersections, NextCurrentIntersections)
-%If the next position is a new intersection, add it to your intersections
-manage_moving_agent_intersections(Ci, P, Ki, [P | Ci]):-contains(Ki, P).
+
+
+remove_until([H | T], H, [H | T]).
+remove_until([_ | T], Value, Ans):-
+    remove_until(T, Value, Ans).
+
+
+%If its the last head, don't add it
+manage_moving_agent_intersections([H|T], H, _, [H|T]).
+%If the next position is a new intersection, add it to your intersections, or stop to that point
+manage_moving_agent_intersections(Ci, P, Ki, OutCi):-
+    contains(Ki, P),
+    (contains(Ci, P) ->
+        remove_until(Ci, P, OutCi)
+    ;
+        OutCi = [P | Ci]
+    ).
 %Otherwise, just do nothing
 manage_moving_agent_intersections(Ci, _, _, Ci).
 
@@ -161,17 +178,21 @@ get_new_open_positions(Positions, PathFrom1, OpenPositions):- acc_get_new_open_p
 
 %gm_finishing_agent(AInfo, GlobalInfo, ReservedPositions, NextAgent, NextGlobalInfo, Move)
 %If its at the finish, leave
-gm_finishing_agent(agentInfo(ID, Pos, _, _, []), globalInfo(OPl, KI, Ip, Gs, NumFinished, Itf), _, 
-    agent(agentState(finished), agentInfo(ID, Pos, [], [], [])), globalInfo(OPl, KI, Ip, Gs, NextNumFinished, Itf), no_move):-
-        leave_maze(ID),
-        NextNumFinished is NumFinished + 1.
+gm_finishing_agent(agentInfo(ID, Pos, _, _, []), globalInfo(OPl, KI, Ip, Gs, NumFinished, Itf), _, agent(agentState(finished), agentInfo(ID, Pos, [], [], [])), globalInfo(OPl, KI, Ip, Gs, NextNumFinished, Itf), no_move):-
+    leave_maze(ID),
+    NextNumFinished is NumFinished + 1.
 %If its next position is reserved already, don't move
-gm_finishing_agent(agentInfo(Id, Pos, _, _, [NPos | T]), GlobalInfo, ReservedPositions, 
-    agent(agentState(going_to_finish), agentInfo(Id, Pos, [],[],[NPos | T])), GlobalInfo, no_move):-
-        %Again, this is only true on the condition the next position has already been reserved
-        contains(ReservedPositions, NPos).
-gm_finishing_agent(agentInfo(Id, _, _, _, [NPos, T]), GlobalInfo, _, 
-    agent(agentState(going_to_finish), agentInfo(Id, NPos, [], [], T)), GlobalInfo, NPos).
+gm_finishing_agent(agentInfo(Id, Pos, _, _, [NPos | T]), GlobalInfo, ReservedPositions, agent(agentState(going_to_finish), agentInfo(Id, Pos, [],[],[NPos | T])), GlobalInfo, no_move):-
+        %Again, this is only true on the condition the next position has already been reserved or has an agent on it
+        contains(ReservedPositions, NPos) ; lookup_pos(NPos, a(_)).
+
+
+gm_finishing_agent(agentInfo(Id, _, _, _, [NPos| T]), GlobalInfo, _, agent(agentState(going_to_finish), agentInfo(Id, NPos, [], [], T)), GlobalInfo, NPos).
+
+
+%The adjacent point, and intersection path from 1
+%Agent ID, its position, its intersection path, the path from the last intersection, the path its travelling
+%gi: OpenPoint list, Intersections, intersection paths, goal state, numFinished, intersectionsToFinish
 
 gm_get_path_to_finish(agentInfo(ID, Pos, AIPath, _, _), KnownPaths, IntersectsToGoal, agentInfo(ID, Pos, [], [], PathToGoal)):-
     AIPath = [LastIntersection | _],
@@ -181,8 +202,8 @@ gm_get_path_to_finish(agentInfo(ID, Pos, AIPath, _, _), KnownPaths, IntersectsTo
 
 %gm_get_targeting_agent(AInfo, GlobalInfo, ReservedPositions, NextAgent, Move).
 %If the next position is reserved, don't do anything
-gm_get_targeting_agent(agentInfo(ID, Pos, IPath, _, [NPos | T]), _, ReservedPositions, agent(agentState(travelling), agentInfo(ID, Pos, IPath, [], [NPos | T])), no_move):-
-    contains(ReservedPositions, NPos).
+gm_get_targeting_agent(agentInfo(ID, Pos, IPath, _, [NPos | T]), _, ReservedPositions, agent(agentState(targeting), agentInfo(ID, Pos, IPath, [], [NPos | T])), no_move):-
+    contains(ReservedPositions, NPos) ; lookup_pos(NPos, a(_)).
 %If the agent has finished the path, set it to exploring    %assume that the intersection you are at is already on your IPath
 gm_get_targeting_agent(agentInfo(ID, Pos, IPath, _, [LP | []]), _, _, agent(agentState(exploring), agentInfo(ID, LP, IPath, [LP, Pos], [])), LP).
 %Otherwise its just moving about. 
@@ -197,7 +218,7 @@ gm_get_targeting_agent(agentInfo(ID, _, IPath, _, [NextP | T]), globalInfo(_, KI
 
 
 %Success case
-gm_get_exploring_agent(agentInfo(ID, p(V,V), [IPH | IPT], PTH, _), globalInfo(_, KI, KnownPaths, _, _, _), agent(agentState(finished), []), NextGlobalInfo, no_move):-
+gm_get_exploring_agent(agentInfo(ID, p(V,V), [IPH | IPT], PTH, _), globalInfo(_, KI, KnownPaths, _, _, _), agent(agentState(finished), agentInfo(ID, p(V,V), [], [], [])), NextGlobalInfo, no_move):-
     ailp_grid_size(GSize),
     GSize == V,
     leave_maze(ID),
@@ -304,11 +325,14 @@ get_agent_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo, AgentOrder, Move
 
 
 
+get_and_perform_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo):-
+    get_agent_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo, AgentOrder, Moves),
+    agents_do_moves(AgentOrder, Moves).
+
 %Everyone has finished, end.
 perform_step(NumberOfAgents, _, globalInfo(_, _, _, goalState(known), NumberOfAgents, _)).
 perform_step(NumberOfAgents, Agents, GlobalInfo):-
-    get_agent_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo, AgentOrder, Moves),
-    agents_do_moves(AgentOrder, Moves),
+    get_and_perform_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo),
     !,
     perform_step(NumberOfAgents, NextAgents, NextGlobalInfo).
 
@@ -317,7 +341,21 @@ perform_step(NumberOfAgents, Agents, GlobalInfo):-
 %Agent ID, its position, its intersection path, the path from the last intersection, the path its travelling
 %gi: OpenPoint list, Intersections, intersection paths, goal state, numFinished, intersectionsToFinish
 
-acc_setup_infos([], GI, Agents, Agents, GI, A, B, A, B).
+
+get_start_paths([], _, Ans, Ans).
+get_start_paths([_ | Tq], [], Acc, Ans):-
+    get_start_paths(Tq, Tq, Acc, Ans).
+get_start_paths([Hq | Tq], [Hq | Tc], Acc, Ans):-
+    get_start_paths([Hq | Tq], Tc, Acc, Ans).
+get_start_paths([Hq | Tq], [Hc | Tc], Acc, Ans):-
+    find_astar(go(Hc), [], Hq, 999, [Path,_]),
+    add_known_path(Acc, Hq, Hc, [Hq |Path], NAcc),
+    get_start_paths([Hq | Tq], Tc, NAcc, Ans).
+get_start_paths(KI, StartPaths):-
+    get_start_paths(KI, KI, [], StartPaths).
+
+acc_setup_infos([], globalInfo(OpenPoints, KI, [], Gs, Nf, Itf), Agents, Agents, globalInfo(OpenPoints, KI, StartPaths, Gs, Nf, Itf), A, B, A, B):-
+    get_start_paths(KI, StartPaths).
 acc_setup_infos([ID | AgentIDs], globalInfo(OpenPoints, KI, [], Gs, Nf, Itf), AAcc, Agents, StartGlobalInfo, FirstMA, FirstMM, MAOut, MMOut):-
     get_agent_position(ID, Pos),
     NKI = [Pos | KI],
