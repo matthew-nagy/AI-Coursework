@@ -1,10 +1,3 @@
-%To do tommorow; Final case of the no moving agents puzzle
-%Take the going_to_target thing outside of the main loop, just a*ing there without anything complicated
-%Once you are in this state, any fail should be met with a retry; this is non-negotiable
-%add some debug prints for each state, and trace move by move to watch and see if they are acting correctly. Something somewhere is messing up
-%could be that the moved hibernating agents aren't getting their IPath updated correctly?
-
-
 hibernating.
 exploring.
 targeting.
@@ -210,11 +203,10 @@ gm_finishing_agent(agentInfo(Id, _, _, _, [NPos| T]), GlobalInfo, _, agent(agent
 %Agent ID, its position, its intersection path, the path from the last intersection, the path its travelling
 %gi: OpenPoint list, Intersections, intersection paths, goal state, numFinished, intersectionsToFinish
 
-gm_get_path_to_finish(agentInfo(ID, Pos, AIPath, _, _), KnownPaths, IntersectsToGoal, agentInfo(ID, Pos, [], [], PathToGoal)):-
-    AIPath = [LastIntersection | _],
-    find_astar(go(LastIntersection), [], Pos, 999, [PathToLastIntersection, _]),
-    get_path_from_intersections(KnownPaths, IntersectsToGoal, AIPath, PathFromLastIntersection),
-    append(PathToLastIntersection, PathFromLastIntersection, PathToGoal).
+gm_get_path_to_finish(agentInfo(ID, Pos, _, _, _), _, _, agentInfo(ID, Pos, [], [], PathToGoal)):-
+    ailp_grid_size(GSize),
+    MaxEn is GSize * GSize,
+    find_astar(go(p(GSize, GSize)), [], Pos, MaxEn, [PathToGoal, _]).
 
 %gm_get_targeting_agent(AInfo, GlobalInfo, ReservedPositions, NextAgent, Move).
 %If the next position is reserved, don't do anything
