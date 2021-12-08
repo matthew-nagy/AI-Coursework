@@ -353,70 +353,82 @@ filter_non_moving_agents([agent(agentState(X), I) | T], FAcc, FOAcc, FilteredNoM
 filter_non_moving_agents(NoMoveAgents, FilteredNoMoveAgents, FilteredOutAgents):-
     filter_non_moving_agents(NoMoveAgents, [], [], FilteredNoMoveAgents, FilteredOutAgents).
 
-%End without finding, append
-replace_if_in_or_append(Agent, [], Acc, [Agent | Acc]).
-%Found it, replace and append the tail
-replace_if_in_or_append(agent(S, agentInfo(ID, P, IP, LIP, CP)), [agent(_, agentInfo(ID, _, _, _, _)) | T], Acc, Ans):-
-    append([agent(S, agentInfo(ID, P, IP, LIP, CP)) | Acc], T, Ans).
-replace_if_in_or_append(Agent, [H | T], Acc, Ans):-
-    replace_if_in_or_append(Agent, T, [H | Acc], Ans).
-%Base case with no accumulator
-replace_if_in_or_append(Agent, List, NewList):-
-    replace_if_in_or_append(Agent, List, [], NewList).
 
-%Without target list means its already been solved
-solved_update_no_move_agents([], Result, _, Result).
-solved_update_no_move_agents([agent(S, agentInfo(ID, P, IP, LIP, CP)) | T], Accumulator, AccumulatorIDs, Result):-
-    %Don't add the aggressor if it was part of the solution
-    (contains(AccumulatorIDs, ID) ->
-        solved_update_no_move_agents(T, Accumulator, AccumulatorIDs, Result)
+deal_with_unsorted_nomoves(Result, _, [], Result).
+deal_with_unsorted_nomoves(Acc, AccIDs, [agent(S, agentInfo(QID, A,B,C,D)) | T], Result):-
+    (contains(AccIDs, QID) ->
+        deal_with_unsorted_nomoves(Acc, AccIDs, T, Result)
     ;
-        NAcc = [agent(S, agentInfo(ID, P, IP, LIP, CP)) | Accumulator],
-        solved_update_no_move_agents(T, NAcc, [ID | AccumulatorIDs], Result)
+        deal_with_unsorted_nomoves([agent(S, agentInfo(QID, A,B,C,D)) | Acc], [QID | AccIDs], T, Result)
     ).
+%What it is called as
+%deal_with_unsorted_nomoves(AlteredPair, AlteredIDs, OtherHeads, Result).
+
 
 %List of AI causing changes, being changed, the accumulation of already added values, their IDs, so you can
 %easily see if the new aggressor had already been changed (don't add), and the result to unify at the end
 %update_no_move_agents(AggressorList, TargetList, Accumulator, AccumulatorIDs, Result)
-update_no_move_agents(_, [], [], Result, _, Result).
-update_no_move_agents(GI, [H | T], [], Acc, AccID, Result):-
-    H = agent(_, agentInfo(ID, _, _, _, _)),
-    update_no_move_agents(GI, T, T, [H | Acc], [ID | AccID], Result).
-update_no_move_agents(GI, [agent(agentState(hibernating), agentInfo(ID, P, IP, LIP, CP)) | AT], TL, Acc, AccID, Result):-
-    update_no_move_agents(GI, AT, TL, [agent(agentState(hibernating), agentInfo(ID, P, IP, LIP, CP)) | Acc], [ID | AccID], Result).
-update_no_move_agents(GI, [H | AT], [H | TT], Acc, AccID, Result):-
-    update_no_move_agents(GI, [H | AT], TT, Acc, AccID, Result).
+update_no_move_agents(_, [], _, Result, Result).
+update_no_move_agents(GI, [H | T], [], Acc, Result):-
+    !,
+    update_no_move_agents(GI, T, T, [H | Acc], Result).
+update_no_move_agents(GI, [agent(agentState(hibernating), agentInfo(ID, P, IP, LIP, CP)) | AT], TL, Acc, Result):-
+    !,
+    update_no_move_agents(GI, AT, TL, [agent(agentState(hibernating), agentInfo(ID, P, IP, LIP, CP)) | Acc], Result).
+update_no_move_agents(GI, [H | AT], [H | TT], Acc, Result):-
+    !,
+    update_no_move_agents(GI, [H | AT], TT, Acc, Result).
 
 
-update_no_move_agents(GI, [AH | AT], [agent(agentState(hibernating), TAI) | _], Acc, AccID, Result):-
+update_no_move_agents(GI, [AH | AT], [agent(agentState(hibernating), TAI) | _], Acc, Result):-
     AH = agent(agentState(targeting), agentInfo(AID, AggressorPos, _, _, [AggressorWantedPos | _])),
     TAI = agentInfo(TID, AggressorWantedPos, TIP, TLIP, TP),
-    say("Here we at", AID),
+
+    %trace,
 
     get_agent_move(AH, GI, ignore_reservation, MovedAggressor, _, _),
+    !,
     MovedAggressor = agent(agentState(NAS), agentInfo(AID, AggressorWantedPos, NAIP, ANLIP, NAP)),
 
     UpdatedAggressor = agent(agentState(NAS), agentInfo(TID, AggressorWantedPos, NAIP, ANLIP, NAP)),
     UpdatedTarget = agent(agentState(hibernating), agentInfo(AID, AggressorPos, TIP, TLIP, TP)),
+    
+    append(AT, Acc, OtherHeads),
+    deal_with_unsorted_nomoves([UpdatedAggressor, UpdatedTarget], [AID, TID], OtherHeads, Result).
 
-    replace_if_in_or_append(UpdatedTarget, [UpdatedAggressor | Acc], NAcc),
-    say("fucky wucky!", TID),
-    solved_update_no_move_agents(AT, NAcc, [AID, TID | AccID], Result).
 
-%Underscore should be TAI
-update_no_move_agents(GI, [AH | AT], [agent(agents(targeting), _) | TT], Acc, AccID, Result):-
-    %case_of_travelling.
-    update_no_move_agents(GI, [AH | AT], TT, Acc, AccID, Result).
 
+
+update_no_move_agents(GI, [AH | AT], [agent(agentState(targeting), TAI) | _], Acc, Result):-
+    AH = agent(agentState(targeting), agentInfo(AID, AggressorPos, _, _, [AggressorWantedPos | _])),
+    TAI = agentInfo(TID, AggressorWantedPos, _, _, [AggressorPos | _]),
+
+    %trace,
+
+    get_agent_move(AH, GI, ignore_reservation, MovedAggressor, _, _),
+    MovedAggressor = agent(agentState(NAS), agentInfo(AID, AggressorWantedPos, NAIP, ANLIP, NAP)),
+    get_agent_move(agent(agentState(targeting), TAI), GI, ignore_reservation, MovedTarget, _, _),
+    !,
+    MovedTarget = agent(agentState(NTS), agentInfo(TID, AggressorPos, NTIP, TNLIP, NTP)),
+
+    UpdatedAggressor = agent(agentState(NAS), agentInfo(TID, AggressorWantedPos, NAIP, ANLIP, NAP)),
+    UpdatedTarget = agent(agentState(NTS), agentInfo(AID, AggressorPos, NTIP, TNLIP, NTP)),
+
+    append(AT, Acc, OtherHeads),
+    deal_with_unsorted_nomoves([UpdatedAggressor, UpdatedTarget], [AID, TID], OtherHeads, Result).
+    
+
+    
 
 %Base case, no interaction, move on
-update_no_move_agents(GI, Aggressors, [_|TT], Acc, AccID, Result):-
-    update_no_move_agents(GI, Aggressors, TT, Acc, AccID, Result).
+update_no_move_agents(GI, Aggressors, [_|TT], Acc, Result):-
+    !,
+    update_no_move_agents(GI, Aggressors, TT, Acc, Result).
 
 
 
 update_no_move_agents(NoMoveAgents, GlobalInfo, UpdatedNoMoveAgents):-
-    update_no_move_agents(GlobalInfo, NoMoveAgents, NoMoveAgents, [], [], UpdatedNoMoveAgents).
+    update_no_move_agents(GlobalInfo, NoMoveAgents, NoMoveAgents, [], UpdatedNoMoveAgents).
 
 
 
@@ -432,6 +444,7 @@ get_agent_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo, AgentOrder, Move
 
 
 get_and_perform_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo):-
+    %notrace, nodebug,
     get_agent_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo, AgentOrder, Moves),
     agents_do_moves(AgentOrder, Moves).
 
@@ -512,3 +525,16 @@ find_moves([A|As],[M|Moves]) :-
     random_member(M,PosMoves),
     find_moves(As,Moves).
 
+sp(A):-
+    join_game(_,A),
+    reset_game,
+    start_game.
+do(A, T):-
+    start,
+    sp(A),
+    (T = 1 -> trace, solve_maze ; solve_maze).
+
+ra(A, Tp):-
+    get_agent_position(A, P),
+    find_astar(go(Tp), [], P, 999, [Path,_]),
+    agent_do_moves(A, Path).
