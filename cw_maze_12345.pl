@@ -1,3 +1,10 @@
+%To do tommorow; Final case of the no moving agents puzzle
+%Take the going_to_target thing outside of the main loop, just a*ing there without anything complicated
+%Once you are in this state, any fail should be met with a retry; this is non-negotiable
+%add some debug prints for each state, and trace move by move to watch and see if they are acting correctly. Something somewhere is messing up
+%could be that the moved hibernating agents aren't getting their IPath updated correctly?
+
+
 hibernating.
 exploring.
 targeting.
@@ -10,11 +17,20 @@ agentState(targeting).
 agentState(going_to_finish).
 agentState(finished).
 
+updated.
+still_static.
+
+no_non_mover_change_state(finished).
+no_non_mover_change_state(going_to_finish).
+no_non_mover_change_state(exploring).
 
 seeking.
 known.
 goalState(seeking).
 goalState(known).
+
+ignore_reservation.
+reservation(_).
 
 get_maze_heuristic(p(X, Y), Heuristic):-
     ailp_grid_size(GSize),
@@ -182,7 +198,7 @@ gm_finishing_agent(agentInfo(ID, Pos, _, _, []), globalInfo(OPl, KI, Ip, Gs, Num
     leave_maze(ID),
     NextNumFinished is NumFinished + 1.
 %If its next position is reserved already, don't move
-gm_finishing_agent(agentInfo(Id, Pos, _, _, [NPos | T]), GlobalInfo, ReservedPositions, agent(agentState(going_to_finish), agentInfo(Id, Pos, [],[],[NPos | T])), GlobalInfo, no_move):-
+gm_finishing_agent(agentInfo(Id, Pos, _, _, [NPos | T]), GlobalInfo, reservation(ReservedPositions), agent(agentState(going_to_finish), agentInfo(Id, Pos, [],[],[NPos | T])), GlobalInfo, no_move):-
         %Again, this is only true on the condition the next position has already been reserved or has an agent on it
         contains(ReservedPositions, NPos) ; lookup_pos(NPos, a(_)).
 
@@ -202,7 +218,7 @@ gm_get_path_to_finish(agentInfo(ID, Pos, AIPath, _, _), KnownPaths, IntersectsTo
 
 %gm_get_targeting_agent(AInfo, GlobalInfo, ReservedPositions, NextAgent, Move).
 %If the next position is reserved, don't do anything
-gm_get_targeting_agent(agentInfo(ID, Pos, IPath, _, [NPos | T]), _, ReservedPositions, agent(agentState(targeting), agentInfo(ID, Pos, IPath, [], [NPos | T])), no_move):-
+gm_get_targeting_agent(agentInfo(ID, Pos, IPath, _, [NPos | T]), _, reservation(ReservedPositions), agent(agentState(targeting), agentInfo(ID, Pos, IPath, [], [NPos | T])), no_move):-
     contains(ReservedPositions, NPos) ; lookup_pos(NPos, a(_)).
 %If the agent has finished the path, set it to exploring    %assume that the intersection you are at is already on your IPath
 gm_get_targeting_agent(agentInfo(ID, Pos, IPath, _, [LP | []]), _, _, agent(agentState(exploring), agentInfo(ID, LP, IPath, [LP, Pos], [])), LP).
@@ -302,26 +318,116 @@ get_agent_move(agent(agentState(hibernating), AInfo), globalInfo(OpenList, G2, K
 
 
 %No more agents, unify with all the accumulators, global info stays the same
-get_agent_moves([], GlobalInfo, NextAgents, AgentOrder, Moves, NextAgents, GlobalInfo, AgentOrder, Moves).
+get_agent_moves([], GlobalInfo, NextAgents, AgentOrder, Moves, NoMoveAgents, NextAgents, NoMoveAgents, GlobalInfo, AgentOrder, Moves).
 %Run the current agent, add to he accumulators
-get_agent_moves([Agent | RemainingAgents], GlobalInfo, NAAcc, AOAcc, MAcc, NextAgents, NextGlobalInfo, AgentOrder, Moves):-
-    get_agent_move(Agent, GlobalInfo, MAcc, UpdatedAgent, UpdatedGlobalInfo, Move),
+get_agent_moves([Agent | RemainingAgents], GlobalInfo, NAAcc, AOAcc, MAcc, NMAAcc, NextAgents, NoMoveAgents, NextGlobalInfo, AgentOrder, Moves):-
+    get_agent_move(Agent, GlobalInfo, reservation(MAcc), UpdatedAgent, UpdatedGlobalInfo, Move),
     Agent = agent(_, agentInfo(ID, _, _, _, _)),
     
     %If it hasn't got a move, the next accumulators are the same as this time
     (Move == no_move ->
         NAOACC = AOAcc,
-        NMAcc = MAcc
+        NMAcc = MAcc,
+        NNAAcc = NAAcc,
+        NNMAAcc = [UpdatedAgent | NMAAcc]
     ;
     %Otherwise the next accumulators need the agents ID and move in it
         NAOACC = [ID | AOAcc], 
-        NMAcc = [Move | MAcc]
+        NMAcc = [Move | MAcc],
+        NNAAcc = [UpdatedAgent | NAAcc],
+        NNMAAcc = NMAAcc
     ),
 
-    get_agent_moves(RemainingAgents, UpdatedGlobalInfo, [UpdatedAgent | NAAcc], NAOACC, NMAcc, NextAgents, NextGlobalInfo, AgentOrder, Moves).
+    get_agent_moves(RemainingAgents, UpdatedGlobalInfo, NNAAcc, NAOACC, NMAcc, NNMAAcc, NextAgents, NoMoveAgents, NextGlobalInfo, AgentOrder, Moves).
+
+%Remove agents from the non mover list that cannot be changed. Ie, an exploring agent
+%Base case
+filter_non_moving_agents([], FilteredNoMoveAgents, FilteredOutAgents, FilteredNoMoveAgents, FilteredOutAgents).
+filter_non_moving_agents([agent(agentState(X), I) | T], FAcc, FOAcc, FilteredNoMoveAgents, FilteredOutAgents):-
+    no_non_mover_change_state(X),
+    filter_non_moving_agents(T, FAcc, [agent(agentState(X), I) | FOAcc], FilteredNoMoveAgents, FilteredOutAgents).
+filter_non_moving_agents([agent(agentState(X), I) | T], FAcc, FOAcc, FilteredNoMoveAgents, FilteredOutAgents):-
+    not(no_non_mover_change_state(X)),
+    filter_non_moving_agents(T, [agent(agentState(X), I) | FAcc], FOAcc, FilteredNoMoveAgents, FilteredOutAgents).
+%Base case with no accumulator
+filter_non_moving_agents(NoMoveAgents, FilteredNoMoveAgents, FilteredOutAgents):-
+    filter_non_moving_agents(NoMoveAgents, [], [], FilteredNoMoveAgents, FilteredOutAgents).
+
+%End without finding, append
+replace_if_in_or_append(Agent, [], Acc, [Agent | Acc]).
+%Found it, replace and append the tail
+replace_if_in_or_append(agent(S, agentInfo(ID, P, IP, LIP, CP)), [agent(_, agentInfo(ID, _, _, _, _)) | T], Acc, Ans):-
+    append([agent(S, agentInfo(ID, P, IP, LIP, CP)) | Acc], T, Ans).
+replace_if_in_or_append(Agent, [H | T], Acc, Ans):-
+    replace_if_in_or_append(Agent, T, [H | Acc], Ans).
+%Base case with no accumulator
+replace_if_in_or_append(Agent, List, NewList):-
+    replace_if_in_or_append(Agent, List, [], NewList).
+
+%Without target list means its already been solved
+solved_update_no_move_agents([], Result, _, Result).
+solved_update_no_move_agents([agent(S, agentInfo(ID, P, IP, LIP, CP)) | T], Accumulator, AccumulatorIDs, Result):-
+    %Don't add the aggressor if it was part of the solution
+    (contains(AccumulatorIDs, ID) ->
+        solved_update_no_move_agents(T, Accumulator, AccumulatorIDs, Result)
+    ;
+        NAcc = [agent(S, agentInfo(ID, P, IP, LIP, CP)) | Accumulator],
+        solved_update_no_move_agents(T, NAcc, [ID | AccumulatorIDs], Result)
+    ).
+
+%List of AI causing changes, being changed, the accumulation of already added values, their IDs, so you can
+%easily see if the new aggressor had already been changed (don't add), and the result to unify at the end
+%update_no_move_agents(AggressorList, TargetList, Accumulator, AccumulatorIDs, Result)
+update_no_move_agents(_, [], [], Result, _, Result).
+update_no_move_agents(GI, [H | T], [], Acc, AccID, Result):-
+    H = agent(_, agentInfo(ID, _, _, _, _)),
+    update_no_move_agents(GI, T, T, [H | Acc], [ID | AccID], Result).
+update_no_move_agents(GI, [agent(agentState(hibernating), agentInfo(ID, P, IP, LIP, CP)) | AT], TL, Acc, AccID, Result):-
+    update_no_move_agents(GI, AT, TL, [agent(agentState(hibernating), agentInfo(ID, P, IP, LIP, CP)) | Acc], [ID | AccID], Result).
+update_no_move_agents(GI, [H | AT], [H | TT], Acc, AccID, Result):-
+    update_no_move_agents(GI, [H | AT], TT, Acc, AccID, Result).
+
+
+update_no_move_agents(GI, [AH | AT], [agent(agentState(hibernating), TAI) | _], Acc, AccID, Result):-
+    AH = agent(agentState(targeting), agentInfo(AID, AggressorPos, _, _, [AggressorWantedPos | _])),
+    TAI = agentInfo(TID, AggressorWantedPos, TIP, TLIP, TP),
+    say("Here we at", AID),
+
+    get_agent_move(AH, GI, ignore_reservation, MovedAggressor, _, _),
+    MovedAggressor = agent(agentState(NAS), agentInfo(AID, AggressorWantedPos, NAIP, ANLIP, NAP)),
+
+    UpdatedAggressor = agent(agentState(NAS), agentInfo(TID, AggressorWantedPos, NAIP, ANLIP, NAP)),
+    UpdatedTarget = agent(agentState(hibernating), agentInfo(AID, AggressorPos, TIP, TLIP, TP)),
+
+    replace_if_in_or_append(UpdatedTarget, [UpdatedAggressor | Acc], NAcc),
+    say("fucky wucky!", TID),
+    solved_update_no_move_agents(AT, NAcc, [AID, TID | AccID], Result).
+
+%Underscore should be TAI
+update_no_move_agents(GI, [AH | AT], [agent(agents(targeting), _) | TT], Acc, AccID, Result):-
+    %case_of_travelling.
+    update_no_move_agents(GI, [AH | AT], TT, Acc, AccID, Result).
+
+
+%Base case, no interaction, move on
+update_no_move_agents(GI, Aggressors, [_|TT], Acc, AccID, Result):-
+    update_no_move_agents(GI, Aggressors, TT, Acc, AccID, Result).
+
+
+
+update_no_move_agents(NoMoveAgents, GlobalInfo, UpdatedNoMoveAgents):-
+    update_no_move_agents(GlobalInfo, NoMoveAgents, NoMoveAgents, [], [], UpdatedNoMoveAgents).
+
+
+
+
 %The version without accumulators
 get_agent_moves(Agents, GlobalInfo, NextAgents, NextGlobalInfo, AgentOrder, Moves):-
-    get_agent_moves(Agents, GlobalInfo, [], [], [], NextAgents, NextGlobalInfo, AgentOrder, Moves).
+    get_agent_moves(Agents, GlobalInfo, [], [], [], [], MovingAgents, NoMoveAgents, NextGlobalInfo, AgentOrder, Moves),
+    filter_non_moving_agents(NoMoveAgents, FilteredNoMoveAgents, FilteredOutAgents),
+    update_no_move_agents(FilteredNoMoveAgents, NextGlobalInfo, UpdatedNoMoveAgents),
+    append(FilteredOutAgents, UpdatedNoMoveAgents, OtherAgents),
+    append(MovingAgents, OtherAgents, NextAgents).
 
 
 
