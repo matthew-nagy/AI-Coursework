@@ -24,12 +24,13 @@ on_board(p(X,Y), BoardDimension) :-
 %Binding of Prolog predicate to a name I will understand
 contains(List, Element) :- member(Element, List).
 
-
 %--------------------------------------------------
+node(p(_,_), _, _, _, _).
 % node contains:   Position, PreviouslyTravelled, Cost, DistanceTravelled, EnergyHere
 %       PreviouslyTravelled is a list of prior positions
 %       Cost is the heuristic + DistanceTravelled
 %       DistanceTravelled is the number of cells visited before arriving here
+searchData(_, _, _).
 % searchData: OpenList, ClosedCells, BoardDimension
 %       OpenList is the list of nodes to be searched
 %       OpenCells are cells being searched.
@@ -41,7 +42,7 @@ contains(List, Element) :- member(Element, List).
 not_last_travelled(_, []).
 not_last_travelled(NewPosition, [Last | _]) :- NewPosition \= Last.
 
-get_single_possible_position([Position, Travelled, _, _, _], [_, OpenCells, ClosedCells, BoardDimension], OutPos):-
+get_single_possible_position(node(Position, Travelled, _, _, _), searchData(_, OpenCells, ClosedCells, BoardDimension), OutPos):-
     m(Direction),
     get_moved_position(Direction, Position, NextPosition),
     not_last_travelled(NextPosition, Travelled),
@@ -73,13 +74,14 @@ get_heuristic(DistanceToHere, go(Target), Here, NodeCost):- manhattan_heuristic(
 get_heuristic(DistanceToHere, find(_), _, DistanceToHere).
 
 %Assuming you have the energy, set this new node for exploration
+%get_new_node(go(p(13, 14)), node(p(1, 1), [], 17.69180601295413, 0, 100), p(1, 2), _13850)
 get_new_node(Task, LastNode, NewPosition, NewNode):-
-    LastNode = [Position, PreviouslyTravelled, _, DistanceTravelled, OldEnergy],
+    LastNode = node(Position, PreviouslyTravelled, _, DistanceTravelled, OldEnergy),
 
     NewDistanceTravelled is DistanceTravelled + 1,
     get_heuristic(NewDistanceTravelled, Task, NewPosition, NodeCost),
     NewEnergyHere is OldEnergy - 1,
-    NewNode = [NewPosition, [Position | PreviouslyTravelled], NodeCost, NewDistanceTravelled, NewEnergyHere].
+    NewNode = node(NewPosition, [Position | PreviouslyTravelled], NodeCost, NewDistanceTravelled, NewEnergyHere).
 
 get_new_nodes(OpenNodes, OpenCells, _, _, [], OpenNodes, OpenCells).
 
@@ -91,7 +93,7 @@ get_new_nodes(OpenNodes, OpenCells, _, _, [], OpenNodes, OpenCells).
 get_new_nodes(OpenNodes, OpenCells, Task, LastNode, [PosH | PosT], NewNodes, NewCells):-
     get_new_nodes(OpenNodes, OpenCells, Task, LastNode, PosT, SemiNew, SemiCell),
     get_new_node(Task, LastNode, PosH, NewNode),
-    NewNode = [Pos, _, _, _, _],
+    NewNode = node(Pos, _, _, _, _),
     NewCells = [Pos | SemiCell],
     insert_node(SemiNew, NewNode, NewNodes).
 
@@ -106,16 +108,14 @@ finished_insert_node([H | T], Acc, Ans):-
 
 w_insert_node([], InsertingNode, Acc, Ans) :- reverse([InsertingNode | Acc], Ans).
 w_insert_node([H | T], InsertingNode, Acc, Ans):-
-    H = [_, _, HeadCost, _, _],
-    InsertingNode = [_, _, NewCost, _, _],
-    NewCost < HeadCost,
-    NewAcc = [H | [InsertingNode | Acc]],
-    finished_insert_node(T, NewAcc, Ans).
-w_insert_node([H | T], InsertingNode, Acc, Ans):-
-    H = [_, _, HeadCost, _, _],
-    InsertingNode = [_, _, NewCost, _, _],
-    NewCost >= HeadCost,
-    w_insert_node(T, InsertingNode, [H | Acc], Ans).
+    H = node(_, _, HeadCost, _, _),
+    InsertingNode = node(_, _, NewCost, _, _),
+    (NewCost < HeadCost ->
+        NewAcc = [H | [InsertingNode | Acc]],
+        finished_insert_node(T, NewAcc, Ans)
+    ;
+        w_insert_node(T, InsertingNode, [H | Acc], Ans)
+    ).
 
 
 %Inserts nodes to the queue, ordering off cost 
@@ -123,15 +123,15 @@ insert_node([], InsertingNode, [InsertingNode]).
 insert_node([QueH | QueT], InsertingNode, Ans):- w_insert_node([QueH | QueT], InsertingNode, [], Ans).
 
 %No energy at cell case
-explore_node(_, [Position,_,_,_,E], [OL, OC, CC, BD], [OL, OC, [Position | CC], BD]):- E =< 0, !, fail.
+explore_node(_, node(Position,_,_,_,E), searchData(OL, OC, CC, BD), searchData(OL, OC, [Position | CC], BD)) :- E =< 0, !, fail.
 
 %Regular Case
 explore_node(Task, Node, SearchData, NewSearchData):-
-    Node = [ExploredPosition, _, _, _, _],
+    Node = node(ExploredPosition, _, _, _, _),
     get_possible_positions(Node, SearchData, PossiblePositions),
-    SearchData = [Sd_OpenList, Sd_OpenCells, Sd_ClosedCells, BoardDimension],
+    SearchData = searchData(Sd_OpenList, Sd_OpenCells, Sd_ClosedCells, BoardDimension),
     get_new_nodes(Sd_OpenList, Sd_OpenCells, Task, Node, PossiblePositions, N_OpenList, N_OpenCells),
-    NewSearchData =[N_OpenList, N_OpenCells, [ExploredPosition | Sd_ClosedCells], BoardDimension].
+    NewSearchData =searchData(N_OpenList, N_OpenCells, [ExploredPosition | Sd_ClosedCells], BoardDimension).
 
 check_success(go(X), EndPosition, _) :- achieved(go(X), EndPosition).
 check_success(find(X), EndPosition, IlligalGoals) :-
@@ -146,26 +146,26 @@ astar_step(_, _, SearchData, _, _) :-
     fail.
 %Success case
 astar_step(Task, IlligalGoals, SearchData, Path, PathCost):-
-    SearchData = [ [ThisNode | _], _, _, EnergyHere ],
-    ThisNode = [EndPosition, PathToGetThere, PathCost, _, _],
+    SearchData = searchData([ThisNode | _], _, _, EnergyHere ),
+    ThisNode = node(EndPosition, PathToGetThere, PathCost, _, _),
     check_success(Task, EndPosition, IlligalGoals),
     EnergyHere > 0,
     %Found a path
     reverse([EndPosition | PathToGetThere], Path).
 %Generic case
 astar_step(Task, IlligalGoals, SearchData, Path, PathCost):-
-    SearchData = [ [ThisNode | OpenList], OpenCells, TravelledList, BD ],
-    ThisNode = [EndPosition, _, _, _, _],
+    SearchData = searchData([ThisNode | OpenList], OpenCells, TravelledList, BD),
+    ThisNode = node(EndPosition, _, _, _, _),
     not(check_success(Task, EndPosition, IlligalGoals)),
-    explore_node(Task, ThisNode, [OpenList, OpenCells, TravelledList, BD], NewSearchData),
+    explore_node(Task, ThisNode, searchData(OpenList, OpenCells, TravelledList, BD), NewSearchData),
     astar_step(Task, IlligalGoals, NewSearchData, Path, PathCost).
 
 %This almost does it. But it includes the starting position
 almost_find_astar(Task, IlligalGoals, StartPosition, StartEnergy, Path, PathCost):-
     get_heuristic(0, Task, StartPosition, Cost),
-    StartNode = [StartPosition, [], Cost, 0, StartEnergy],
+    StartNode = node(StartPosition, [], Cost, 0, StartEnergy),
     ailp_grid_size(BD),
-    astar_step(Task, IlligalGoals, [ [StartNode], [StartPosition], [], BD ], Path, PathCost).
+    astar_step(Task, IlligalGoals, searchData([StartNode], [StartPosition], [], BD), Path, PathCost).
 
 find_astar(Task, IlligalGoals, StartPosition, StartEnergy, [Path, PathCost]):-
     almost_find_astar(Task, IlligalGoals, StartPosition, StartEnergy, AlmostPath, PathCost),
